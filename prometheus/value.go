@@ -26,6 +26,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+var processStartTime = time.Now()
+
 // ValueType is an enumeration of metric types that represent a simple value.
 type ValueType int
 
@@ -67,6 +69,7 @@ type valueFunc struct {
 	valType    ValueType
 	function   func() float64
 	labelPairs []*dto.LabelPair
+	start      time.Time
 }
 
 // newValueFunc returns a newly allocated valueFunc with the given Desc and
@@ -91,7 +94,7 @@ func (v *valueFunc) Desc() *Desc {
 }
 
 func (v *valueFunc) Write(out *dto.Metric) error {
-	return populateMetric(v.valType, v.function(), v.labelPairs, nil, out)
+	return populateMetric(v.valType, v.function(), v.labelPairs, nil, out, processStartTime)
 }
 
 // NewConstMetric returns a metric with one fixed value that cannot be
@@ -110,7 +113,7 @@ func NewConstMetric(desc *Desc, valueType ValueType, value float64, labelValues 
 	}
 
 	metric := &dto.Metric{}
-	if err := populateMetric(valueType, value, MakeLabelPairs(desc, labelValues), nil, metric); err != nil {
+	if err := populateMetric(valueType, value, MakeLabelPairs(desc, labelValues), nil, metric, processStartTime); err != nil {
 		return nil, err
 	}
 
@@ -153,11 +156,12 @@ func populateMetric(
 	labelPairs []*dto.LabelPair,
 	e *dto.Exemplar,
 	m *dto.Metric,
+	start time.Time,
 ) error {
 	m.Label = labelPairs
 	switch t {
 	case CounterValue:
-		m.Counter = &dto.Counter{Value: proto.Float64(v), Exemplar: e}
+		m.Counter = &dto.Counter{Value: proto.Float64(v), Exemplar: e, CreatedTimestamp: timestamppb.New(start)}
 	case GaugeValue:
 		m.Gauge = &dto.Gauge{Value: proto.Float64(v)}
 	case UntypedValue:

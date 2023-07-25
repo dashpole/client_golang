@@ -25,6 +25,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // nativeHistogramBounds for the frac of observed values. Only relevant for
@@ -742,9 +743,10 @@ func (h *histogram) Write(out *dto.Metric) error {
 	waitForCooldown(count, coldCounts)
 
 	his := &dto.Histogram{
-		Bucket:      make([]*dto.Bucket, len(h.upperBounds)),
-		SampleCount: proto.Uint64(count),
-		SampleSum:   proto.Float64(math.Float64frombits(atomic.LoadUint64(&coldCounts.sumBits))),
+		Bucket:           make([]*dto.Bucket, len(h.upperBounds)),
+		SampleCount:      proto.Uint64(count),
+		SampleSum:        proto.Float64(math.Float64frombits(atomic.LoadUint64(&coldCounts.sumBits))),
+		CreatedTimestamp: timestamppb.New(h.lastResetTime),
 	}
 	out.Histogram = his
 	out.Label = h.labelPairs
@@ -1183,7 +1185,7 @@ func (h *constHistogram) Desc() *Desc {
 }
 
 func (h *constHistogram) Write(out *dto.Metric) error {
-	his := &dto.Histogram{}
+	his := &dto.Histogram{CreatedTimestamp: timestamppb.New(processStartTime)}
 
 	buckets := make([]*dto.Bucket, 0, len(h.buckets))
 
