@@ -17,22 +17,28 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"time"
 
+	prombridge "go.opentelemetry.io/contrib/bridges/prometheus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/sdk/metric"
+
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // 12 buckets per histogram
-const histogramCardinality = 1000
-const counterCardinality = 1000
-const gaugeCardinality = 1000
+const histogramCardinality = 10000
+const counterCardinality = 10000
+const gaugeCardinality = 10000
 
 func main() {
+	ctx := context.Background()
 	histogram := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "histogram",
 		Help: "A histogram",
@@ -83,11 +89,24 @@ func main() {
 	}()
 
 	// Expose /metrics HTTP endpoint using the created custom registry.
-	http.Handle(
-		"/metrics", promhttp.HandlerFor(
-			registry,
-			promhttp.HandlerOpts{}),
+	// http.Handle(
+	// 	"/metrics", promhttp.HandlerFor(
+	// 		registry,
+	// 		promhttp.HandlerOpts{}),
+	// )
+
+	metricExporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithInsecure())
+	if err != nil {
+		log.Fatalln(err)
+	}
+	meterProvider := metric.NewMeterProvider(
+		metric.WithReader(metric.NewPeriodicReader(metricExporter,
+			metric.WithProducer(prombridge.NewMetricProducer(prombridge.WithGatherer(registry))),
+			metric.WithInterval(time.Second))),
 	)
+	defer meterProvider.Shutdown(ctx)
+	otel.SetMeterProvider(meterProvider)
 	// To test: curl localhost:8080/metrics
+	// This is also for the profiling endpoint
 	log.Fatalln(http.ListenAndServe(":8080", nil))
 }
