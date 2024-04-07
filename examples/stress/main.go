@@ -22,6 +22,7 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"regexp"
 	"time"
 
 	prombridge "go.opentelemetry.io/contrib/bridges/prometheus"
@@ -30,6 +31,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // 12 buckets per histogram
@@ -38,7 +41,14 @@ const counterCardinality = 10000
 const gaugeCardinality = 10000
 
 func main() {
-	ctx := context.Background()
+	// expose a minimum set of memory metrics to be able to accurately measure memory usage.
+	memoryUsageRegistry := prometheus.NewRegistry()
+	memoryUsageRegistry.MustRegister(collectors.NewGoCollector(
+		collectors.WithGoCollectorMemStatsMetricsDisabled(),
+		collectors.WithoutGoCollectorRuntimeMetrics(regexp.MustCompile(".*")),
+		collectors.WithGoCollectorRuntimeMetrics(collectors.GoRuntimeMetricsRule{Matcher: regexp.MustCompile("/memory/classes/total:bytes")}),
+	))
+
 	histogram := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "histogram",
 		Help: "A histogram",
@@ -88,13 +98,21 @@ func main() {
 		}
 	}()
 
-	// Expose /metrics HTTP endpoint using the created custom registry.
-	// http.Handle(
-	// 	"/metrics", promhttp.HandlerFor(
-	// 		registry,
-	// 		promhttp.HandlerOpts{}),
-	// )
+	// Expose /memorymetrics HTTP endpoint.
+	http.Handle(
+		"/memorymetrics", promhttp.HandlerFor(
+			memoryUsageRegistry,
+			promhttp.HandlerOpts{}),
+	)
 
+	//Expose /metrics HTTP endpoint.
+	http.Handle(
+		"/metrics", promhttp.HandlerFor(
+			registry,
+			promhttp.HandlerOpts{}),
+	)
+
+	ctx := context.Background()
 	metricExporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithInsecure())
 	if err != nil {
 		log.Fatalln(err)
